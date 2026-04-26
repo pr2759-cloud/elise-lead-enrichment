@@ -1,0 +1,55 @@
+name: Enrich Leads
+
+on:
+  schedule:
+    # 09:00 Eastern = 13:00 UTC (standard time) / 14:00 UTC (daylight time).
+    # Using 13:00 UTC as a reasonable compromise; adjust per DST if needed.
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+    # One-click manual run from the Actions tab
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore cache (SQLite enrichment cache)
+        uses: actions/cache@v4
+        with:
+          path: cache.db
+          key: enrichment-cache-${{ github.run_id }}
+          restore-keys: |
+            enrichment-cache-
+
+      - name: Write service account key
+        if: ${{ env.GOOGLE_SA_JSON != '' }}
+        env:
+          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+        run: |
+          printf '%s' "$GOOGLE_SA_JSON" > service-account.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$PWD/service-account.json" >> "$GITHUB_ENV"
+
+      - name: Run enrichment pipeline
+        env:
+          NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+          WALKSCORE_KEY: ${{ secrets.WALKSCORE_KEY }}
+          CENSUS_KEY: ${{ secrets.CENSUS_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LEADS_SHEET_ID: ${{ secrets.LEADS_SHEET_ID }}
+          LEADS_WORKSHEET_NAME: ${{ secrets.LEADS_WORKSHEET_NAME }}
+          LOG_LEVEL: INFO
+        run: |
+          python -m src.main sheet

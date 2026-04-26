@@ -1,0 +1,26 @@
+# Secrets
+.env
+service-account.json
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Local cache (SQLite) and outputs
+cache.db
+cache.db-journal
+cache.db-wal
+cache.db-shm
+out.csv
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
