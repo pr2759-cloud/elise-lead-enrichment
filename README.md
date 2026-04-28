@@ -2,6 +2,11 @@
 
 Takes raw inbound leads (name, email, company, property address) and produces a **lead score**, a **personalized outreach email**, and a **sales insights block** — fully automated, using four free public APIs.
 
+
+## Excel working sheet -  
+
+https://docs.google.com/spreadsheets/d/1MVNC1k8IdJZ1vGVEfkzat1AGg4bYe-fPpNiEwZgRT-I/edit?gid=0#gid=0
+
 ## What it does
 
 For every inbound lead, the tool:
