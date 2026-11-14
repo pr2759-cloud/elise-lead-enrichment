@@ -5,7 +5,7 @@ Markdown block for pasting into Slack/email.
 """
 from __future__ import annotations
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 from .models import EnrichedLead
@@ -20,6 +20,8 @@ class RunReport:
     avg_signals_resolved: float
     top_n: List[EnrichedLead]  # top leads by score (for quick SDR review)
     run_duration_seconds: float
+    by_action: Counter = field(default_factory=Counter)  # v2: send / review / silent
+    by_route: Counter = field(default_factory=Counter)   # v2: owner queues
 
     def to_plain_text(self) -> str:
         lines = [
@@ -35,6 +37,17 @@ class RunReport:
             count = self.by_tier.get(tier, 0)
             pct = (count / self.total * 100) if self.total else 0
             lines.append(f"    {tier:5s}  {count:3d}  ({pct:4.1f}%)")
+
+        if self.by_action:
+            lines.append("")
+            lines.append("  By action (gate):")
+            for action in ("send", "review", "silent"):
+                lines.append(f"    {action:7s} {self.by_action.get(action, 0):3d}")
+        if self.by_route:
+            lines.append("")
+            lines.append("  By route:")
+            for route, count in self.by_route.most_common():
+                lines.append(f"    {route:16s} {count:3d}")
 
         if self.api_errors:
             lines.append("")
@@ -100,6 +113,8 @@ def build_report(
     total_score = 0.0
     total_signals = 0.0
 
+    by_action = Counter(e.action for e in enriched if e.action)
+    by_route = Counter(e.route for e in enriched if e.route)
     for e in enriched:
         tiers[e.score.tier] += 1
         total_score += e.score.final_score
@@ -119,4 +134,6 @@ def build_report(
         avg_signals_resolved=(total_signals / count) if count else 0.0,
         top_n=sorted(enriched, key=lambda e: e.score.final_score, reverse=True)[:top_n],
         run_duration_seconds=duration_seconds,
+        by_action=by_action,
+        by_route=by_route,
     )

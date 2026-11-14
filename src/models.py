@@ -15,6 +15,11 @@ class Lead:
     city: str
     state: str
     country: str = "US"
+    # v2 — optional attribution and outcome fields. `source` / `campaign` say
+    # where the lead came from; `outcome` is filled in later by sales.
+    source: str = ""
+    campaign: str = ""
+    outcome: str = ""
 
     @property
     def company_domain(self) -> Optional[str]:
@@ -25,6 +30,24 @@ class Lead:
     @property
     def first_name(self) -> str:
         return (self.person_name or "").split(" ", 1)[0] or "there"
+
+    @classmethod
+    def from_row(cls, row: Dict[str, Any]) -> "Lead":
+        """Build a Lead from a CSV/JSON/Sheet row. Optional v2 columns may be absent."""
+        def get(key: str, default: str = "") -> str:
+            return str(row.get(key) or default).strip()
+        return cls(
+            person_name=get("person_name"),
+            person_email=get("person_email"),
+            company=get("company"),
+            property_address=get("property_address"),
+            city=get("city"),
+            state=get("state"),
+            country=get("country") or "US",
+            source=get("source"),
+            campaign=get("campaign"),
+            outcome=get("outcome").lower(),
+        )
 
     def fingerprint(self) -> str:
         """Stable hash-friendly string for deduplication / caching."""
@@ -147,6 +170,14 @@ class LeadScore:
             + len(self.timing.sub_signals) + len(self.intent.sub_signals)
         )
 
+    @property
+    def data_confidence(self) -> float:
+        """Share of sub-signals backed by real data (0-1). Missing ones were imputed."""
+        total = self.total_signals_count
+        if not total:
+            return 0.0
+        return (total - self.missing_signals_count) / total
+
 
 # ---------------------------------------------------------------------------
 # Final output
@@ -164,6 +195,11 @@ class EnrichedLead:
     email_body: str
     processed_at: str = field(default_factory=lambda: datetime.utcnow().isoformat(timespec="seconds") + "Z")
     errors: List[str] = field(default_factory=list)
+    # v2 — what to do with the lead and who owns it
+    action: str = ""          # send | review | silent
+    action_reason: str = ""
+    route: str = ""
+    route_reason: str = ""
 
     def to_row(self) -> Dict[str, Any]:
         """Flatten to a dict suitable for a spreadsheet row."""
@@ -182,6 +218,14 @@ class EnrichedLead:
             "timing_score": round(self.score.timing.average, 2),
             "intent_score": round(self.score.intent.average, 2),
             "signals_resolved": f"{self.score.total_signals_count - self.score.missing_signals_count}/{self.score.total_signals_count}",
+            "data_confidence": round(self.score.data_confidence, 2),
+            "action": self.action,
+            "action_reason": self.action_reason,
+            "route": self.route,
+            "route_reason": self.route_reason,
+            "source": self.lead.source,
+            "campaign": self.lead.campaign,
+            "outcome": self.lead.outcome,
             "insights": self.insights,
             "email_subject": self.email_subject,
             "email_body": self.email_body,
@@ -205,10 +249,15 @@ INPUT_COLUMNS = [
     "property_address", "city", "state", "country",
 ]
 
-OUTPUT_COLUMNS = INPUT_COLUMNS + [
+# Optional input columns (v2): read when present, never required.
+OPTIONAL_INPUT_COLUMNS = ["source", "campaign", "outcome"]
+
+OUTPUT_COLUMNS = INPUT_COLUMNS + OPTIONAL_INPUT_COLUMNS + [
     "status", "score", "tier",
     "fit_score", "value_score", "timing_score", "intent_score",
-    "signals_resolved", "insights", "email_subject", "email_body",
+    "signals_resolved", "data_confidence",
+    "action", "action_reason", "route", "route_reason",
+    "insights", "email_subject", "email_body",
     "wikipedia_url", "top_news_headline", "top_news_url",
     "walk_score", "median_rent", "renter_share_pct",
     "error_summary", "processed_at",

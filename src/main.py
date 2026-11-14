@@ -7,6 +7,8 @@ Modes:
   sheet        Read/write via Google Sheets (uses env vars)
   reset-sheet  Reset sheet rows with given statuses back to 'pending'
   report IN    Render a run-summary report from an enriched JSON file
+  pipeline-report IN|--sheet   Attribution + scoring check (v2)
+  learn IN|--sheet [--write]   Fit category weights to recorded outcomes (v2)
 """
 from __future__ import annotations
 import argparse
@@ -46,6 +48,10 @@ def _banner():
         f"LLMpolish={'yes' if flags.use_llm_polish else 'no'}",
     ]
     print(f"[EliseAI lead enrichment] runtime: {' | '.join(bits)}", flush=True)
+    w = config.CATEGORY_WEIGHTS
+    print(f"[EliseAI lead enrichment] weights: {config.WEIGHTS_SOURCE} — "
+          f"fit {w['fit']:.2f} · value {w['value']:.2f} · timing {w['timing']:.2f} · "
+          f"intent {w['intent']:.2f}", flush=True)
 
 
 def _print_enriched(e: EnrichedLead, verbose: bool = True) -> None:
@@ -54,7 +60,10 @@ def _print_enriched(e: EnrichedLead, verbose: bool = True) -> None:
     print(f"{e.lead.person_name} <{e.lead.person_email}> — {e.lead.company}")
     print(f"{e.lead.property_address}, {e.lead.city} {e.lead.state}")
     print(line)
-    print(f"  SCORE: {e.score.final_score:.1f}  [{e.score.tier}]")
+    print(f"  SCORE: {e.score.final_score:.1f}  [{e.score.tier}]  "
+          f"data confidence {e.score.data_confidence:.0%}")
+    print(f"  ACTION: {e.action.upper()} — {e.action_reason}")
+    print(f"  ROUTE:  {e.route} — {e.route_reason}")
     if verbose:
         for name, cs in (("Fit", e.score.fit), ("Value", e.score.value),
                          ("Timing", e.score.timing), ("Intent", e.score.intent)):
@@ -65,9 +74,13 @@ def _print_enriched(e: EnrichedLead, verbose: bool = True) -> None:
         for ln in e.insights.splitlines():
             print(f"    {ln}")
         print()
-        print(f"  EMAIL DRAFT — Subject: {e.email_subject}")
-        for ln in e.email_body.splitlines():
-            print(f"    {ln}")
+        if e.action == "silent":
+            print("  EMAIL DRAFT — none (silent: recorded, no outreach)")
+        else:
+            label = "for review" if e.action == "review" else "ready to send"
+            print(f"  EMAIL DRAFT ({label}) — Subject: {e.email_subject}")
+            for ln in e.email_body.splitlines():
+                print(f"    {ln}")
         if e.errors:
             print()
             print(f"  NOTES: {'; '.join(e.errors)}")
@@ -246,6 +259,39 @@ def cmd_report(args) -> int:
     return 0
 
 
+def _load_flat_rows(args) -> List[dict]:
+    if args.sheet:
+        from .sheets import _open_sheet, read_all_rows
+        return read_all_rows(_open_sheet())
+    if not args.input:
+        raise SystemExit("Give an enriched .csv/.json file, or --sheet.")
+    from .pipeline_report import load_rows
+    return load_rows(args.input)
+
+
+def cmd_pipeline_report(args) -> int:
+    from .pipeline_report import build_pipeline_report
+    rep = build_pipeline_report(_load_flat_rows(args))
+    print(rep.to_markdown() if args.markdown else rep.to_plain_text())
+    return 0
+
+
+def cmd_learn(args) -> int:
+    from .learning import learn, write_weights
+    result = learn(_load_flat_rows(args))
+    print(result.to_plain_text())
+    if args.write:
+        if result.learned_weights is None:
+            print("Nothing written: no weights were learned.")
+            return 1
+        if not result.recommend and not args.force:
+            print("Nothing written: the learned weights did not clear the bar (use --force to override).")
+            return 1
+        path = write_weights(result)
+        print(f"Wrote learned weights to {path}. The next run will use them.")
+    return 0
+
+
 def main(argv=None) -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(
@@ -283,6 +329,23 @@ def main(argv=None) -> int:
     p_report = sub.add_parser("report", help="Render a summary report from an enriched JSON file")
     p_report.add_argument("input", help="Enriched JSON path")
     p_report.set_defaults(func=cmd_report)
+
+    p_pipe = sub.add_parser(
+        "pipeline-report",
+        help="Attribution + scoring check: leads, actions and conversion by source, tier and route",
+    )
+    p_pipe.add_argument("input", nargs="?", help="Enriched .csv or .json (with an 'outcome' column)")
+    p_pipe.add_argument("--sheet", action="store_true", help="Read rows from the configured Google Sheet")
+    p_pipe.add_argument("--markdown", action="store_true", help="Render as Markdown (for Slack/Notion)")
+    p_pipe.set_defaults(func=cmd_pipeline_report)
+
+    p_learn = sub.add_parser("learn", help="Fit category weights to recorded outcomes")
+    p_learn.add_argument("input", nargs="?", help="Enriched .csv or .json with an 'outcome' column")
+    p_learn.add_argument("--sheet", action="store_true", help="Read rows from the configured Google Sheet")
+    p_learn.add_argument("--write", action="store_true",
+                         help="Save the learned weights if they beat the current ones on held-out data")
+    p_learn.add_argument("--force", action="store_true", help="With --write, save even if they don't")
+    p_learn.set_defaults(func=cmd_learn)
 
     args = parser.parse_args(argv)
     _banner()

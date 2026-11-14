@@ -87,19 +87,20 @@ def read_pending_leads(ws) -> List[Tuple[int, Lead]]:
             continue
         if not cell("person_email") or not cell("company"):
             continue
-        leads.append((
-            i,
-            Lead(
-                person_name=cell("person_name"),
-                person_email=cell("person_email"),
-                company=cell("company"),
-                property_address=cell("property_address"),
-                city=cell("city"),
-                state=cell("state"),
-                country=cell("country") or "US",
-            ),
-        ))
+        leads.append((i, Lead.from_row({col: cell(col) for col in header})))
     return leads
+
+
+def read_all_rows(ws) -> List[dict]:
+    """Every data row as a dict keyed by header — used by `report` and `learn`."""
+    values = ws.get_all_values()
+    if not values:
+        return []
+    header = values[0]
+    return [
+        {col: (row[j] if j < len(row) else "") for j, col in enumerate(header)}
+        for row in values[1:]
+    ]
 
 
 def write_enriched(ws, row_number: int, enriched: EnrichedLead) -> None:

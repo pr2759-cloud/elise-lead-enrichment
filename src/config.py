@@ -23,6 +23,78 @@ CATEGORY_WEIGHTS: Dict[str, float] = {
 assert abs(sum(CATEGORY_WEIGHTS.values()) - 1.0) < 1e-9, "Category weights must sum to 1.0"
 
 # ---------------------------------------------------------------------------
+# Learned weights (v2). `python -m src.main learn ... --write` saves weights
+# fitted on real outcomes to this file; if it exists, it overrides the
+# hand-set defaults above. Delete the file to go back to the defaults.
+# ---------------------------------------------------------------------------
+LEARNED_WEIGHTS_PATH = os.getenv(
+    "LEARNED_WEIGHTS_PATH",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "learned_weights.json"),
+).strip()
+WEIGHTS_SOURCE = "default (hand-set)"
+
+
+def _load_learned_weights() -> None:
+    """Override CATEGORY_WEIGHTS in place from LEARNED_WEIGHTS_PATH, if valid."""
+    global WEIGHTS_SOURCE
+    if not LEARNED_WEIGHTS_PATH or not os.path.exists(LEARNED_WEIGHTS_PATH):
+        return
+    import json
+    try:
+        with open(LEARNED_WEIGHTS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        weights = {k: float(data["weights"][k]) for k in CATEGORY_WEIGHTS}
+    except Exception:
+        return  # malformed file: keep the defaults rather than crash a scheduled run
+    if abs(sum(weights.values()) - 1.0) > 1e-3 or min(weights.values()) < 0:
+        return
+    CATEGORY_WEIGHTS.update(weights)
+    WEIGHTS_SOURCE = f"learned ({os.path.basename(LEARNED_WEIGHTS_PATH)}, {data.get('n_labels', '?')} labels)"
+
+
+_load_learned_weights()
+
+# ---------------------------------------------------------------------------
+# Action gate (v2): Sniper / Scout / Archivist.
+# The pipeline decides what to do with a lead, not just how to score it.
+#   send   (Sniper)    — strong, well-evidenced lead: email goes out
+#   review (Scout)     — promising or uncertain: a human checks the draft first
+#   silent (Archivist) — weak fit: record it, draft nothing, send nothing
+# ---------------------------------------------------------------------------
+SEND_MIN_SCORE = 80.0       # at or above: eligible for automatic send
+REVIEW_MIN_SCORE = 60.0     # at or above: draft for human review
+MIN_DATA_CONFIDENCE = 0.6   # below this share of resolved signals, never auto-send
+
+# ---------------------------------------------------------------------------
+# Routing (v2). Rules are checked in order; the first match wins.
+# Conditions available (all must hold): tier_in, action_in, multi_property,
+# has_trigger_30d, free_email, min_confidence, max_confidence.
+# ---------------------------------------------------------------------------
+ROUTING_RULES = [
+    {"route": "data_review", "when": {"max_confidence": MIN_DATA_CONFIDENCE},
+     "reason": "too few signals resolved to trust the score; enrich manually"},
+    {"route": "nurture", "when": {"action_in": ["silent"]},
+     "reason": "below the outreach bar; keep in CRM, no outreach"},
+    {"route": "enterprise_ae", "when": {"tier_in": ["HOT", "WARM"], "multi_property": True},
+     "reason": "multi-property operator; portfolio-wide deal"},
+    {"route": "trigger_sdr", "when": {"tier_in": ["HOT", "WARM"], "has_trigger_30d": True},
+     "reason": "fresh trigger event; speed matters"},
+    {"route": "commercial_sdr", "when": {"tier_in": ["HOT", "WARM"]},
+     "reason": "qualified single-site lead"},
+    {"route": "nurture", "when": {},
+     "reason": "no rule matched; default to nurture"},
+]
+
+# ---------------------------------------------------------------------------
+# Outcomes (v2). Sales fills the `outcome` column; these values close the loop.
+# ---------------------------------------------------------------------------
+POSITIVE_OUTCOMES = {"replied", "meeting", "demo", "opportunity", "won"}
+NEGATIVE_OUTCOMES = {"no_response", "not_interested", "unsubscribed", "bounced", "lost"}
+MIN_LABELS_TO_LEARN = 30          # labelled leads needed before fitting weights
+MIN_PER_CLASS_TO_LEARN = 5        # and at least this many of each outcome class
+MIN_AUC_GAIN_TO_ADOPT = 0.02      # cross-validated gain needed to recommend new weights
+
+# ---------------------------------------------------------------------------
 # Tier thresholds on the final 0-100 score.
 # ---------------------------------------------------------------------------
 TIER_THRESHOLDS = {

@@ -7,7 +7,9 @@ from .enrich.wikipedia import enrich_company_wikipedia
 from .enrich.newsapi import enrich_news
 from .enrich.census import enrich_market
 from .enrich.walkscore import enrich_location
+from .gating import decide
 from .insights import build_insights
+from .routing import RouteContext, route_lead
 from .models import EnrichedLead, Lead
 from .outreach.email_drafter import draft_email
 from .scoring.engine import score_lead
@@ -49,14 +51,22 @@ def enrich_one(lead: Lead) -> EnrichedLead:
     )
     enriched.insights = build_insights(enriched)
 
-    subject, body = draft_email(lead, company, news, market, location, score, enriched.insights)
-    enriched.email_subject = subject
-    enriched.email_body = body
+    # v2: decide before drafting. Silent leads get no draft at all, which also
+    # saves the LLM call.
+    decision = decide(lead, score)
+    enriched.action, enriched.action_reason = decision.action, decision.reason
+    route = route_lead(RouteContext(lead, score, company, news, decision.action))
+    enriched.route, enriched.route_reason = route.route, route.reason
+
+    if decision.action != "silent":
+        subject, body = draft_email(lead, company, news, market, location, score, enriched.insights)
+        enriched.email_subject = subject
+        enriched.email_body = body
 
     log.info(
-        "Scored %s (%s) → %.1f %s [%d/%d signals, %d errors]",
+        "Scored %s (%s) → %.1f %s [%d/%d signals, %d errors] → %s via %s",
         lead.company, lead.person_email, score.final_score, score.tier,
         score.total_signals_count - score.missing_signals_count,
-        score.total_signals_count, len(errors),
+        score.total_signals_count, len(errors), decision.action, route.route,
     )
     return enriched

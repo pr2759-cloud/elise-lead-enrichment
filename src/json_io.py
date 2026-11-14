@@ -22,15 +22,7 @@ def read_leads(path: str) -> List[Lead]:
     leads: List[Lead] = []
     for i, row in enumerate(data):
         try:
-            leads.append(Lead(
-                person_name=(row.get("person_name") or "").strip(),
-                person_email=(row.get("person_email") or "").strip(),
-                company=(row.get("company") or "").strip(),
-                property_address=(row.get("property_address") or "").strip(),
-                city=(row.get("city") or "").strip(),
-                state=(row.get("state") or "").strip(),
-                country=(row.get("country") or "US").strip() or "US",
-            ))
+            leads.append(Lead.from_row(row))
         except Exception as e:
             raise ValueError(f"Invalid lead at index {i}: {e}") from e
     return leads
@@ -63,6 +55,13 @@ def write_enriched(path: str, enriched: Iterable[EnrichedLead]) -> int:
             "outreach": {
                 "subject": e.email_subject,
                 "body": e.email_body,
+            },
+            "decision": {
+                "action": e.action,
+                "action_reason": e.action_reason,
+                "route": e.route,
+                "route_reason": e.route_reason,
+                "data_confidence": round(e.score.data_confidence, 2),
             },
             "insights": e.insights,
             "errors": e.errors,

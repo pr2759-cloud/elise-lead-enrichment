@@ -53,3 +53,13 @@ jobs:
           LOG_LEVEL: INFO
         run: |
           python -m src.main sheet
+
+      # v2: publish the attribution + scoring check to the run's summary page.
+      # Weight changes (`learn --write`) stay a deliberate, human-reviewed step.
+      - name: Pipeline report
+        if: ${{ success() }}
+        env:
+          LEADS_SHEET_ID: ${{ secrets.LEADS_SHEET_ID }}
+          LEADS_WORKSHEET_NAME: ${{ secrets.LEADS_WORKSHEET_NAME }}
+        run: |
+          python -m src.main pipeline-report --sheet --markdown >> "$GITHUB_STEP_SUMMARY"

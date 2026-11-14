@@ -11,7 +11,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src.gating import decide
 from src.insights import build_insights
+from src.routing import RouteContext, route_lead
 from src.models import (
     CompanyEnrichment, EnrichedLead, Lead, LocationEnrichment,
     MarketEnrichment, NewsEnrichment,
@@ -114,12 +116,20 @@ def main():
             insights="", email_subject="", email_body="",
         )
         enriched.insights = build_insights(enriched)
-        subj, body = draft_email(lead, s["company"], s["news"], s["market"],
-                                 s["location"], score, enriched.insights)
+        decision = decide(lead, score)
+        route = route_lead(RouteContext(lead, score, s["company"], s["news"], decision.action))
+        if decision.action == "silent":
+            subj, body = "(none — silent: recorded, no outreach)", ""
+        else:
+            subj, body = draft_email(lead, s["company"], s["news"], s["market"],
+                                     s["location"], score, enriched.insights)
 
-        print(f"\n  Final score: {score.final_score:.1f}/100 — {score.tier}")
+        print(f"\n  Final score: {score.final_score:.1f}/100 — {score.tier}  "
+              f"(data confidence {score.data_confidence:.0%})")
         print(f"  Categories:  Fit={score.fit.average:.1f}  Value={score.value.average:.1f}  "
               f"Timing={score.timing.average:.1f}  Intent={score.intent.average:.1f}")
+        print(f"  Action:      {decision.action.upper()} — {decision.reason}")
+        print(f"  Route:       {route.route} — {route.reason}")
         print("\n  INSIGHTS BLOCK:")
         for ln in enriched.insights.splitlines():
             print(f"    {ln}")

@@ -32,13 +32,14 @@ def _company_scale_score(c: CompanyEnrichment) -> float:
 
     Standalone Wikipedia page = 10
     Parent-only mention = 7
-    No Wikipedia presence = 4
+
+    No Wikipedia presence is *unknown* scale, not small scale: plenty of real
+    mid-market operators have no page. v1 scored it 4, which penalised them;
+    v2 treats it as missing (see score_fit).
     """
     if c.has_wikipedia_page:
         return 10.0
-    if c.parent_mention_only:
-        return 7.0
-    return 4.0
+    return 7.0
 
 
 def score_fit(lead: Lead, company: CompanyEnrichment) -> CategoryScore:
@@ -62,8 +63,8 @@ def score_fit(lead: Lead, company: CompanyEnrichment) -> CategoryScore:
     # Market Tier
     cat.sub_signals["market_tier"] = market_tier_score(lead.city, lead.state, lead.country)
 
-    # Company Scale
-    if company.error is None:
+    # Company Scale — absence of a Wikipedia page is unknown, not "small"
+    if company.error is None and (company.has_wikipedia_page or company.parent_mention_only):
         cat.sub_signals["company_scale"] = _company_scale_score(company)
     else:
         cat.sub_signals["company_scale"] = NEUTRAL_SUBSIGNAL_SCORE

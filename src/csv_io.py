@@ -17,16 +17,14 @@ def read_leads(path: str) -> List[Lead]:
         if missing:
             raise ValueError(f"CSV missing required columns: {missing}")
         for row in reader:
-            leads.append(Lead(
-                person_name=(row.get("person_name") or "").strip(),
-                person_email=(row.get("person_email") or "").strip(),
-                company=(row.get("company") or "").strip(),
-                property_address=(row.get("property_address") or "").strip(),
-                city=(row.get("city") or "").strip(),
-                state=(row.get("state") or "").strip(),
-                country=(row.get("country") or "US").strip() or "US",
-            ))
+            leads.append(Lead.from_row(row))
     return leads
+
+
+def read_rows(path: str) -> List[dict]:
+    """Read any CSV (e.g. an enriched output with outcomes filled in) as dicts."""
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
 
 
 def write_enriched(path: str, enriched: Iterable[EnrichedLead]) -> int:
